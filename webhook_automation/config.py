@@ -32,7 +32,12 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"  # noqa: S104
     port: int = 8000
 
-    model_config = {"env_prefix": "WEBHOOK_"}
+    model_config = {
+        "env_prefix": "WEBHOOK_",
+        "env_file": "webhook_automation/.env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 settings = Settings()
