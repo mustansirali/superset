@@ -122,7 +122,7 @@ def _try_json_readversion(filepath: str) -> str | None:
     try:
         with open(filepath) as f:
             return json.load(f).get("version")
-    except Exception:  # pylint: disable=broad-except
+    except (FileNotFoundError, json.JSONDecodeError, TypeError):
         return None
 
 
@@ -130,7 +130,7 @@ def _try_json_readsha(filepath: str, length: int) -> str | None:
     try:
         with open(filepath) as f:
             return json.load(f).get("GIT_SHA")[:length]
-    except Exception:  # pylint: disable=broad-except
+    except (FileNotFoundError, json.JSONDecodeError, TypeError):
         return None
 
 
