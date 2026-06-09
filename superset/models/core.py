@@ -338,6 +338,11 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
                 encrypted_extra=encrypted_config,
             )
         except Exception:  # pylint: disable=broad-except
+            logger.warning(
+                "Failed to get parameters from URI for database %s",
+                self.database_name,
+                exc_info=True,
+            )
             parameters = {}
 
         return parameters
@@ -347,6 +352,11 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
         try:
             parameters_schema = self.db_engine_spec.parameters_json_schema()  # type: ignore
         except Exception:  # pylint: disable=broad-except
+            logger.warning(
+                "Failed to get parameters JSON schema for database %s",
+                self.database_name,
+                exc_info=True,
+            )
             parameters_schema = {}
         return parameters_schema
 
@@ -391,6 +401,11 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
         try:
             engine_information = self.db_engine_spec.get_public_information()
         except Exception:  # pylint: disable=broad-except
+            logger.warning(
+                "Failed to get engine information for database %s",
+                self.database_name,
+                exc_info=True,
+            )
             engine_information = {}
         return engine_information
 
@@ -1251,7 +1266,12 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
                     schema=table.schema,
                 )
             except Exception:  # pylint: disable=broad-except
-                logger.warning("Has view failed", exc_info=True)
+                logger.warning(
+                    "Failed to get views for table %s in schema %s",
+                    table.table,
+                    table.schema,
+                    exc_info=True,
+                )
                 views = []
 
         return table.table in views

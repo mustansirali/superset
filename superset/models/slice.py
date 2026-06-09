@@ -257,9 +257,12 @@ class Slice(  # pylint: disable=too-many-public-methods
         form_data: dict[str, Any] = {}
         try:
             form_data = json.loads(self.params)
-        except Exception as ex:  # pylint: disable=broad-except
-            logger.error("Malformed json in slice's params", exc_info=True)
-            logger.exception(ex)
+        except (TypeError, json.JSONDecodeError):
+            logger.error(
+                "Malformed json in slice's params for slice %s",
+                self.id,
+                exc_info=True,
+            )
         form_data.update(
             {
                 "slice_id": self.id,
@@ -279,9 +282,12 @@ class Slice(  # pylint: disable=too-many-public-methods
                 return self.get_query_context_factory().create(
                     **{**json.loads(self.query_context), "current_slice": self}
                 )
-            except json.JSONDecodeError as ex:
-                logger.error("Malformed json in slice's query context", exc_info=True)
-                logger.exception(ex)
+            except json.JSONDecodeError:
+                logger.error(
+                    "Malformed json in slice's query context for slice %s",
+                    self.id,
+                    exc_info=True,
+                )
         return None
 
     def get_explore_url(
