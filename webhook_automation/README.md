@@ -13,54 +13,282 @@ A FastAPI webhook server that receives issue payloads and automatically creates
 │   scanner)   │                   │  Server       │               │           │
 └─────────────┘                    └──────────────┘               └───────────┘
                                           │                             │
-                                          │  GET /reports/{key}         │  PRs
-                                          ▼                             ▼
-                                   ┌──────────────┐            ┌───────────────┐
-                                   │  Remediation  │            │  Pull Requests│
-                                   │  Reports      │            │  on GitHub    │
-                                   └──────────────┘            └───────────────┘
+                                   GET /dashboard                 PRs on GitHub
+                                          ▼
+                                   ┌──────────────┐
+                                   │  Analytics    │
+                                   │  Dashboard    │
+                                   └──────────────┘
 ```
 
 ### Flow
 
-1. An external trigger (CI pipeline, cron job, security scanner) sends a
-   `POST /webhook` request with one or more issue descriptions.
+1. An external trigger sends `POST /webhook` with one or more issue descriptions.
 2. The server validates the payload (and optionally verifies an HMAC signature).
 3. For each issue, a Devin session is created via the
-   [Devin v3 API](https://docs.devin.ai/api-reference/overview). The prompt
-   instructs Devin to investigate, fix, run pre-commit, and open a PR.
-4. Sessions are polled asynchronously until they reach a terminal status.
-5. A remediation report is stored locally (JSON file) and available via
-   `GET /reports`. Analytics persist across server restarts.
+   [Devin v3 API](https://docs.devin.ai/api-reference/overview).
+4. Sessions are polled until they reach a terminal status.
+5. Results are persisted to a local JSON file and surfaced via the analytics
+   dashboard and the reports API.
 
-## Quick Start (Docker)
+---
+
+## Running with Docker (Recommended)
+
+### 1. Configure environment
 
 ```bash
 cd webhook_automation
-
-# 1. Create your .env file
 cp .env.example .env
-# Edit .env with your Devin API key and org ID
+```
 
-# 2. Start the server
-docker compose up -d
+Edit `.env` with your Devin credentials (find them at
+[Settings → Service Users](https://app.devin.ai) in the Devin dashboard):
 
-# 3. Fire a test payload
-curl -X POST http://localhost:8000/webhook \
-  -H "Content-Type: application/json" \
-  -d '{"issues":[{"issue_id":"TEST-001","title":"Fix bug","description":"Fix the bug in utils.py"}]}'
+```
+WEBHOOK_DEVIN_API_KEY=cog_your_api_key_here
+WEBHOOK_DEVIN_ORG_ID=org-your_org_id_here
+```
 
-# 4. Check reports
-curl http://localhost:8000/reports
+> **Tip:** Do not wrap values in quotes — write `WEBHOOK_DEVIN_API_KEY=cog_abc123`,
+> not `WEBHOOK_DEVIN_API_KEY='cog_abc123'`.
 
-# 5. Stop the server
+### 2. Start the server
+
+```bash
+docker compose up -d --build
+```
+
+Verify it's running:
+
+```bash
+curl http://localhost:8000/health
+# → {"status":"ok"}
+```
+
+### 3. View logs
+
+```bash
+docker compose logs -f
+```
+
+### 4. Stop the server
+
+```bash
 docker compose down
 ```
 
-## Quick Start (Local Python)
+> Analytics data is stored in a Docker named volume (`analytics-data`) and
+> persists across `docker compose down` / `docker compose up` cycles. To
+> wipe analytics, run `docker volume rm webhook_automation_analytics-data`.
 
-> **Important:** Run all commands from the **repo root** (`superset/`),
-> not from inside `webhook_automation/`.
+---
+
+## Testing the Webhook (curl)
+
+With the server running (`docker compose up -d`), fire payloads from any
+terminal. All commands below assume the default port `8000` — adjust if you
+changed `WEBHOOK_PORT` in `.env`.
+
+### Quick smoke test
+
+```bash
+curl -s http://localhost:8000/health | python3 -m json.tool
+```
+
+### Single issue
+
+```bash
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_type": "issue_remediation",
+    "repo": "mustansirali/superset",
+    "issues": [
+      {
+        "issue_id": "TEST-001",
+        "title": "Missing type hints in utils/date_parser.py",
+        "description": "Add type annotations to parse_human_datetime in superset/utils/date_parser.py.",
+        "severity": "medium",
+        "category": "type_error",
+        "file_paths": ["superset/utils/date_parser.py"]
+      }
+    ]
+  }'
+```
+
+### Multiple issues in one payload
+
+```bash
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_type": "issue_remediation",
+    "repo": "mustansirali/superset",
+    "issues": [
+      {
+        "issue_id": "TEST-002",
+        "title": "Remove unused import in views/api.py",
+        "description": "Remove unused flask jsonify import in superset/views/api.py.",
+        "severity": "low",
+        "category": "lint",
+        "file_paths": ["superset/views/api.py"]
+      },
+      {
+        "issue_id": "TEST-003",
+        "title": "Add docstring to DashboardDAO.copy_dashboard",
+        "description": "Add a docstring to copy_dashboard in superset/daos/dashboard.py describing params and return type.",
+        "severity": "low",
+        "category": "other",
+        "file_paths": ["superset/daos/dashboard.py"]
+      }
+    ]
+  }'
+```
+
+### Security / dependency issue
+
+```bash
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_type": "issue_remediation",
+    "repo": "mustansirali/superset",
+    "issues": [
+      {
+        "issue_id": "SEC-001",
+        "title": "Update vulnerable dependency",
+        "description": "A dependency in requirements/base.txt has a known CVE. Bump to the latest patched release.",
+        "severity": "critical",
+        "category": "dependency",
+        "file_paths": ["requirements/base.txt"],
+        "labels": ["security", "dependencies"]
+      }
+    ]
+  }'
+```
+
+### Custom payload from a JSON file
+
+```bash
+cat > my_payload.json << 'EOF'
+{
+  "event_type": "custom_scan",
+  "repo": "mustansirali/superset",
+  "issues": [
+    {
+      "issue_id": "CUSTOM-001",
+      "title": "Your custom issue title",
+      "description": "Describe the issue and what needs to change.",
+      "severity": "high",
+      "category": "bug",
+      "file_paths": ["path/to/file.py"],
+      "labels": ["custom"]
+    }
+  ]
+}
+EOF
+
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d @my_payload.json
+```
+
+---
+
+## Testing the Analytics Dashboard
+
+### Open the dashboard
+
+Navigate to **<http://localhost:8000/dashboard>** in your browser.
+
+The dashboard shows:
+- **Summary cards** — total events, issues, completed, failed, pending,
+  PRs created, and success rate.
+- **Task Status chart** — doughnut chart of session outcomes.
+- **Throughput Over Time** — stacked bar chart of completed/failed/pending
+  per event.
+- **Recent Events table** — reverse-chronological list with status badges.
+
+It auto-refreshes every 10 seconds. Click **Refresh** for an immediate update.
+
+### Verify dashboard updates
+
+1. Open the dashboard in your browser.
+2. Fire a webhook payload (see curl examples above).
+3. Wait up to 10 seconds (or click Refresh) — the cards and table should
+   reflect the new event.
+
+### Get analytics as JSON
+
+```bash
+curl -s http://localhost:8000/api/stats | python3 -m json.tool
+```
+
+Response includes `overview`, `status_breakdown`, and `timeline` objects.
+
+### Verify persistence across restarts
+
+```bash
+# Fire a payload
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"issues":[{"issue_id":"PERSIST-001","title":"Persistence test","description":"Verify data survives restart."}]}'
+
+# Check the stats
+curl -s http://localhost:8000/api/stats | python3 -m json.tool
+
+# Restart the container
+docker compose restart
+
+# Verify data is still there
+curl -s http://localhost:8000/api/stats | python3 -m json.tool
+```
+
+The `total_events` count should be the same before and after the restart.
+
+---
+
+## Checking Reports
+
+```bash
+# List all remediation reports
+curl -s http://localhost:8000/reports | python3 -m json.tool
+
+# Get a specific report (use the report_key from the webhook response)
+curl -s http://localhost:8000/reports/<report_key> | python3 -m json.tool
+```
+
+Each report shows per-issue session status, Devin session URLs, and any PRs
+created.
+
+---
+
+## Using the Built-in Trigger Script
+
+If you're running the server locally (not Docker), the repo includes a Python
+trigger CLI that sends pre-built sample payloads:
+
+```bash
+# From repo root (superset/), with venv activated:
+python -m webhook_automation.trigger --payload single
+python -m webhook_automation.trigger --payload multi
+python -m webhook_automation.trigger --payload security
+```
+
+The trigger reads `WEBHOOK_PORT` from your `.env` automatically. Override the
+URL with `--url`:
+
+```bash
+python -m webhook_automation.trigger --payload single --url http://localhost:9090/webhook
+```
+
+---
+
+## Running Locally (without Docker)
+
+> Run all commands from the **repo root** (`superset/`), not from inside
+> `webhook_automation/`.
 
 ```bash
 # 1. Create and activate a virtual environment
@@ -71,127 +299,43 @@ source venv/bin/activate        # macOS / Linux
 # 2. Install dependencies
 pip install -r webhook_automation/requirements.txt
 
-# 3. Create your .env file
+# 3. Create your .env
 cp webhook_automation/.env.example webhook_automation/.env
-# Edit webhook_automation/.env with your Devin API key and org ID
+# Edit webhook_automation/.env with your API key and org ID
 
 # 4. Start the server
 python -m webhook_automation
 
-# 5. In a separate terminal (with venv activated, from repo root):
+# 5. Fire a test payload (separate terminal, same venv)
 python -m webhook_automation.trigger --payload single
+
+# Or use any of the curl commands above
 ```
 
-## Environment Variables
+---
 
-Set these in `webhook_automation/.env` (auto-loaded) or as env vars:
+## Running Tests
 
-| Variable | Required | Description |
-|---|---|---|
-| `WEBHOOK_DEVIN_API_KEY` | Yes | Devin API key (starts with `cog_`) |
-| `WEBHOOK_DEVIN_ORG_ID` | Yes | Devin organization ID |
-| `WEBHOOK_WEBHOOK_SECRET` | No | HMAC-SHA256 secret for signature verification |
-| `WEBHOOK_TARGET_REPO` | No | Override target repo (default: `mustansirali/superset`) |
-| `WEBHOOK_POLL_INTERVAL_SECONDS` | No | Polling interval (default: 30) |
-| `WEBHOOK_HOST` | No | Bind host (default: `0.0.0.0`) |
-| `WEBHOOK_ANALYTICS_FILE` | No | Path to analytics JSON file (default: `webhook_automation/data/analytics.json`) |
-| `WEBHOOK_PORT` | No | Bind port (default: `8000`) |
+```bash
+pip install pytest pytest-asyncio
+pytest webhook_automation/tests/ -v
+```
 
-> **Note:** Do not wrap values in quotes in `.env` — write
-> `WEBHOOK_DEVIN_API_KEY=cog_abc123`, not `WEBHOOK_DEVIN_API_KEY='cog_abc123'`.
+18 tests cover the server endpoints, Devin API client, and analytics
+persistence layer.
 
-## API Endpoints
+---
+
+## API Reference
 
 | Method | Path | Description |
-|---|---|---|
-| `GET` | `/health` | Health check |
-| `POST` | `/webhook` | Receive issue payloads |
+|--------|------|-------------|
+| `GET` | `/health` | Health check — returns `{"status":"ok"}` |
+| `POST` | `/webhook` | Receive issue payloads, kick off Devin sessions |
 | `GET` | `/reports` | List all remediation reports |
-| `GET` | `/reports/{key}` | Get a specific report |
-| `GET` | `/dashboard` | Analytics dashboard (HTML) |
-| `GET` | `/api/stats` | Aggregated analytics (JSON) |
-
-## Sending Payloads
-
-### Built-in Sample Payloads
-
-```bash
-# From repo root (local Python):
-python -m webhook_automation.trigger --payload single
-python -m webhook_automation.trigger --payload multi
-python -m webhook_automation.trigger --payload security
-```
-
-### Custom Payloads with curl
-
-**Single issue:**
-
-```bash
-curl -X POST http://localhost:8000/webhook \
-  -H "Content-Type: application/json" \
-  -d '{
-    "issues": [{
-      "issue_id": "MY-001",
-      "title": "Add retry logic to API client",
-      "description": "The HTTP client in superset/utils/core.py has no retry logic. Add exponential backoff for transient failures.",
-      "severity": "medium",
-      "category": "bug"
-    }]
-  }'
-```
-
-**Multiple issues at once:**
-
-```bash
-curl -X POST http://localhost:8000/webhook \
-  -H "Content-Type: application/json" \
-  -d '{
-    "issues": [
-      {
-        "issue_id": "MY-002",
-        "title": "Fix N+1 query in dashboard list",
-        "description": "The GET /api/v1/dashboard/ endpoint issues a separate query per dashboard for owners. Use a joined load instead.",
-        "severity": "high",
-        "category": "performance",
-        "file_paths": ["superset/dashboards/api.py"]
-      },
-      {
-        "issue_id": "MY-003",
-        "title": "Add unit test for date parser",
-        "description": "superset/utils/date_parser.py has no test coverage for ISO 8601 durations. Add pytest tests.",
-        "severity": "low",
-        "category": "test_failure",
-        "file_paths": ["superset/utils/date_parser.py"]
-      }
-    ]
-  }'
-```
-
-**Custom payload from a JSON file:**
-
-```bash
-# Save your payload to a file:
-cat > my_payload.json << 'EOF'
-{
-  "event_type": "security_scan",
-  "repo": "mustansirali/superset",
-  "issues": [{
-    "issue_id": "SEC-001",
-    "title": "Update vulnerable dependency",
-    "description": "cryptography<42.0.0 has a known CVE. Bump to >=42.0.0 in requirements.",
-    "severity": "critical",
-    "category": "dependency",
-    "file_paths": ["requirements/base.txt"],
-    "labels": ["security", "dependencies"]
-  }]
-}
-EOF
-
-# Send it:
-curl -X POST http://localhost:8000/webhook \
-  -H "Content-Type: application/json" \
-  -d @my_payload.json
-```
+| `GET` | `/reports/{key}` | Get a specific report by key |
+| `GET` | `/dashboard` | Real-time analytics dashboard (HTML) |
+| `GET` | `/api/stats` | Aggregated analytics data (JSON) |
 
 ## Webhook Payload Schema
 
@@ -216,72 +360,37 @@ curl -X POST http://localhost:8000/webhook \
 Only `issue_id`, `title`, and `description` are required per issue. All other
 fields are optional and help Devin focus its remediation.
 
+## Environment Variables
+
+Set these in `webhook_automation/.env` (auto-loaded) or as env vars:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `WEBHOOK_DEVIN_API_KEY` | Yes | — | Devin API key (starts with `cog_`) |
+| `WEBHOOK_DEVIN_ORG_ID` | Yes | — | Devin organization ID |
+| `WEBHOOK_WEBHOOK_SECRET` | No | — | HMAC-SHA256 secret for signature verification |
+| `WEBHOOK_TARGET_REPO` | No | `mustansirali/superset` | Target repo for Devin sessions |
+| `WEBHOOK_POLL_INTERVAL_SECONDS` | No | `30` | Session polling interval in seconds |
+| `WEBHOOK_ANALYTICS_FILE` | No | `webhook_automation/data/analytics.json` | Path to analytics persistence file |
+| `WEBHOOK_HOST` | No | `0.0.0.0` | Server bind host |
+| `WEBHOOK_PORT` | No | `8000` | Server bind port (also controls Docker host port) |
+
 ## Signature Verification
 
 If `WEBHOOK_WEBHOOK_SECRET` is set, the server requires a valid
-`X-Webhook-Signature` header on every request:
+`X-Webhook-Signature` header:
 
 ```python
 import hashlib, hmac, json
 
 body = json.dumps(payload).encode()
 signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-# Send as header: X-Webhook-Signature: sha256=abc123...
-```
-
-## Dashboard
-
-Open **<http://localhost:8000/dashboard>** in your browser to see a
-real-time analytics dashboard showing:
-
-- **Summary cards** — total events, issues, completed, failed, pending,
-  PRs created, and success rate.
-- **Task Status chart** — doughnut chart of session outcomes.
-- **Throughput Over Time** — stacked bar chart of completed/failed/pending
-  per event.
-- **Recent Events table** — reverse-chronological list with status badges.
-
-The dashboard auto-refreshes every 10 seconds. Click **Refresh** for an
-immediate update.
-
-For programmatic access, `GET /api/stats` returns the same data as JSON.
-
-### Analytics Persistence
-
-All session analytics are saved to a local JSON file
-(`webhook_automation/data/analytics.json` by default). This means:
-
-- Dashboard data **survives server restarts** — historical runs are
-  preserved and the success rate reflects all sessions ever tracked.
-- When using Docker Compose, a named volume (`analytics-data`) keeps the
-  data file across container recreations.
-- Override the storage path with `WEBHOOK_ANALYTICS_FILE` in your `.env`.
-
-## Monitoring Remediation Progress
-
-After sending a webhook, poll the reports endpoint:
-
-```bash
-# List all reports
-curl http://localhost:8000/reports
-
-# Get specific report (use report_key from webhook response)
-curl http://localhost:8000/reports/<report_key>
-```
-
-Each report shows per-issue session status, Devin session URLs, and any PRs
-created.
-
-## Running Tests
-
-```bash
-pip install pytest pytest-asyncio
-pytest webhook_automation/tests/ -v
+# Send as: X-Webhook-Signature: sha256=abc123...
 ```
 
 ## Docker Details
 
-**Build manually:**
+**Build the image manually:**
 
 ```bash
 cd webhook_automation
@@ -289,19 +398,13 @@ docker build -t webhook-automation .
 docker run --rm -p 8000:8000 --env-file .env webhook-automation
 ```
 
-**Custom port (docker compose):**
+**Custom host port:**
 
-Set `WEBHOOK_PORT` in `.env` to change the host-side port. The container
-always listens on 8000 internally:
-
-```bash
-# .env
-WEBHOOK_PORT=8080
-# → accessible at http://localhost:8080
-```
-
-**View logs:**
+Set `WEBHOOK_PORT` in `.env`. The container always listens on 8000 internally;
+`docker-compose.yml` maps `${WEBHOOK_PORT:-8000}:8000`:
 
 ```bash
-docker compose logs -f
+# In .env:
+WEBHOOK_PORT=9090
+# → accessible at http://localhost:9090
 ```
