@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     webhook_secret: str = ""
     poll_interval_seconds: int = 30
     poll_max_attempts: int = 120
+    analytics_file: str = "webhook_automation/data/analytics.json"
     host: str = "0.0.0.0"  # noqa: S104
     port: int = 8000
 

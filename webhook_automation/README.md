@@ -30,7 +30,8 @@ A FastAPI webhook server that receives issue payloads and automatically creates
    [Devin v3 API](https://docs.devin.ai/api-reference/overview). The prompt
    instructs Devin to investigate, fix, run pre-commit, and open a PR.
 4. Sessions are polled asynchronously until they reach a terminal status.
-5. A remediation report is stored in memory and available via `GET /reports`.
+5. A remediation report is stored locally (JSON file) and available via
+   `GET /reports`. Analytics persist across server restarts.
 
 ## Quick Start (Docker)
 
@@ -93,6 +94,7 @@ Set these in `webhook_automation/.env` (auto-loaded) or as env vars:
 | `WEBHOOK_TARGET_REPO` | No | Override target repo (default: `mustansirali/superset`) |
 | `WEBHOOK_POLL_INTERVAL_SECONDS` | No | Polling interval (default: 30) |
 | `WEBHOOK_HOST` | No | Bind host (default: `0.0.0.0`) |
+| `WEBHOOK_ANALYTICS_FILE` | No | Path to analytics JSON file (default: `webhook_automation/data/analytics.json`) |
 | `WEBHOOK_PORT` | No | Bind port (default: `8000`) |
 
 > **Note:** Do not wrap values in quotes in `.env` — write
@@ -243,6 +245,17 @@ The dashboard auto-refreshes every 10 seconds. Click **Refresh** for an
 immediate update.
 
 For programmatic access, `GET /api/stats` returns the same data as JSON.
+
+### Analytics Persistence
+
+All session analytics are saved to a local JSON file
+(`webhook_automation/data/analytics.json` by default). This means:
+
+- Dashboard data **survives server restarts** — historical runs are
+  preserved and the success rate reflects all sessions ever tracked.
+- When using Docker Compose, a named volume (`analytics-data`) keeps the
+  data file across container recreations.
+- Override the storage path with `WEBHOOK_ANALYTICS_FILE` in your `.env`.
 
 ## Monitoring Remediation Progress
 

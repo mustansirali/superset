@@ -10,4 +10,10 @@ services:
     environment:
       - WEBHOOK_HOST=0.0.0.0
       - WEBHOOK_PORT=8000
+      - WEBHOOK_ANALYTICS_FILE=webhook_automation/data/analytics.json
+    volumes:
+      - analytics-data:/app/webhook_automation/data
     restart: unless-stopped
+
+volumes:
+  analytics-data:

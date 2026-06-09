@@ -35,6 +35,7 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from .analytics_store import AnalyticsStore
 from .config import settings
 from .dashboard import bind_reports, router as dashboard_router
 from .devin_client import DevinAPIClient
@@ -61,9 +62,10 @@ app = FastAPI(
 )
 
 client = DevinAPIClient()
+store = AnalyticsStore(settings.analytics_file)
 
-# In-memory store keyed by event timestamp → report
-reports: dict[str, RemediationReport] = {}
+# Load persisted reports from disk; fall back to empty dict.
+reports: dict[str, RemediationReport] = store.load()
 
 # Wire up the dashboard with access to the shared reports store.
 bind_reports(reports)
@@ -136,6 +138,7 @@ async def _process_issue(
         report.sessions.append(info)
         report.failed += 1
         report.pending = max(0, report.pending - 1)
+        store.save(reports)
         return
 
     session_id = session_data["session_id"]
@@ -164,6 +167,7 @@ async def _process_issue(
     else:
         report.failed += 1
     report.pending = max(0, report.pending - 1)
+    store.save(reports)
 
     logger.info(
         "Issue %s → session %s finished with status=%s, PRs=%s",
@@ -185,11 +189,13 @@ async def _handle_event(event: WebhookEvent) -> None:
         pending=len(event.issues),
     )
     reports[report_key] = report
+    store.save(reports)
 
     tasks = [_process_issue(issue, event.repo, report) for issue in event.issues]
     await asyncio.gather(*tasks, return_exceptions=True)
 
     report.generated_at = datetime.now(timezone.utc)
+    store.save(reports)
     logger.info(
         "Event %s complete – %d/%d issues remediated",
         report_key,
