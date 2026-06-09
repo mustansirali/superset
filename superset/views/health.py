@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 from flask import Blueprint, current_app as app, jsonify
+from flask_login import login_required
 
 from superset import talisman
 from superset.stats_logger import BaseStatsLogger
@@ -35,10 +36,12 @@ def health() -> FlaskResponse:
 
 @health_blueprint.route("/version")
 @talisman(force_https=False)
+@login_required
 def version() -> FlaskResponse:
     """
     Return comprehensive version information including Git SHA
-    and branch when available.
+    and branch when available. Requires authentication to prevent
+    information disclosure of deployment details.
     """
     from superset.utils.version import get_version_metadata
 
