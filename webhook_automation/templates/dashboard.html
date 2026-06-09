@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Webhook Automation Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --border: #334155;
+    --text: #e2e8f0; --muted: #94a3b8;
+    --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --blue: #3b82f6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); padding: 24px;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 8px; }
+  .subtitle {
+    color: var(--muted); font-size: 0.875rem; margin-bottom: 24px;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px; margin-bottom: 32px;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; text-align: center;
+  }
+  .card .value { font-size: 2rem; font-weight: 700; }
+  .card .label {
+    color: var(--muted); font-size: 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    margin-top: 4px;
+  }
+  .card.green .value { color: var(--green); }
+  .card.red .value { color: var(--red); }
+  .card.amber .value { color: var(--amber); }
+  .card.blue .value { color: var(--blue); }
+  .charts {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 24px; margin-bottom: 32px;
+  }
+  @media (max-width: 768px) {
+    .charts { grid-template-columns: 1fr; }
+  }
+  .chart-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+  }
+  .chart-box h2 { font-size: 1rem; margin-bottom: 12px; }
+  .table-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; overflow-x: auto;
+  }
+  .table-box h2 { font-size: 1rem; margin-bottom: 12px; }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 0.875rem;
+  }
+  th {
+    text-align: left; color: var(--muted); font-weight: 600;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+  }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 9999px;
+    font-size: 0.75rem; font-weight: 600;
+  }
+  .badge-green { background: #166534; color: #bbf7d0; }
+  .badge-red { background: #7f1d1d; color: #fecaca; }
+  .badge-amber { background: #78350f; color: #fde68a; }
+  .badge-blue { background: #1e3a5f; color: #bfdbfe; }
+  .empty {
+    text-align: center; color: var(--muted); padding: 48px 0;
+  }
+  .refresh-bar {
+    display: flex; align-items: center;
+    gap: 12px; margin-bottom: 16px;
+  }
+  .refresh-bar button {
+    background: var(--blue); color: #fff; border: none;
+    border-radius: 8px; padding: 8px 16px;
+    cursor: pointer; font-size: 0.875rem;
+  }
+  .refresh-bar button:hover { opacity: 0.9; }
+  .refresh-bar .last-updated {
+    color: var(--muted); font-size: 0.75rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>Webhook Automation Dashboard</h1>
+<p class="subtitle">
+  Issue remediation via Devin &mdash; real-time status and analytics
+</p>
+
+<div class="refresh-bar">
+  <button onclick="refresh()">Refresh</button>
+  <span class="last-updated" id="lastUpdated"></span>
+</div>
+
+<div class="cards" id="cards"></div>
+
+<div class="charts">
+  <div class="chart-box">
+    <h2>Task Status</h2>
+    <canvas id="statusChart"></canvas>
+  </div>
+  <div class="chart-box">
+    <h2>Throughput Over Time</h2>
+    <canvas id="throughputChart"></canvas>
+  </div>
+</div>
+
+<div class="table-box">
+  <h2>Recent Events</h2>
+  <div id="eventsTable"></div>
+</div>
+
+<script>
+let statusChart = null;
+let throughputChart = null;
+
+function statusBadge(status) {
+  const map = {
+    exit: ['badge-green', 'completed'],
+    running: ['badge-blue', 'running'],
+    error: ['badge-red', 'error'],
+    blocked: ['badge-amber', 'blocked'],
+  };
+  const [cls, label] = map[status] || ['badge-amber', status];
+  return '<span class="badge ' + cls + '">' + label + '</span>';
+}
+
+function renderCards(o) {
+  const c = document.getElementById('cards');
+  c.innerHTML = ''
+    + '<div class="card blue"><div class="value">'
+    + o.total_events
+    + '</div><div class="label">Total Events</div></div>'
+    + '<div class="card"><div class="value">'
+    + o.total_issues
+    + '</div><div class="label">Total Issues</div></div>'
+    + '<div class="card green"><div class="value">'
+    + o.completed
+    + '</div><div class="label">Completed</div></div>'
+    + '<div class="card red"><div class="value">'
+    + o.failed
+    + '</div><div class="label">Failed</div></div>'
+    + '<div class="card amber"><div class="value">'
+    + o.pending
+    + '</div><div class="label">Pending</div></div>'
+    + '<div class="card blue"><div class="value">'
+    + o.total_prs_created
+    + '</div><div class="label">PRs Created</div></div>'
+    + '<div class="card green"><div class="value">'
+    + o.success_rate + '%'
+    + '</div><div class="label">Success Rate</div></div>';
+}
+
+function renderStatusChart(breakdown) {
+  var ctx = document.getElementById('statusChart').getContext('2d');
+  var labels = Object.keys(breakdown);
+  var data = Object.values(breakdown);
+  var colors = labels.map(function(l) {
+    if (l === 'exit') return '#22c55e';
+    if (l === 'error') return '#ef4444';
+    if (l === 'running') return '#3b82f6';
+    return '#f59e0b';
+  });
+  var mapped = labels.map(function(l) {
+    return l === 'exit' ? 'completed' : l;
+  });
+
+  if (statusChart) statusChart.destroy();
+  statusChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: mapped,
+      datasets: [{
+        data: data,
+        backgroundColor: colors,
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: '#e2e8f0', padding: 16 }
+        }
+      }
+    }
+  });
+}
+
+function renderThroughputChart(timeline) {
+  var ctx = document.getElementById('throughputChart').getContext('2d');
+  var labels = timeline.map(function(t) {
+    return new Date(t.timestamp).toLocaleTimeString();
+  });
+  var completed = timeline.map(function(t) { return t.completed; });
+  var failed = timeline.map(function(t) { return t.failed; });
+  var pending = timeline.map(function(t) { return t.pending; });
+
+  if (throughputChart) throughputChart.destroy();
+  throughputChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Completed',
+          data: completed,
+          backgroundColor: '#22c55e'
+        },
+        {
+          label: 'Failed',
+          data: failed,
+          backgroundColor: '#ef4444'
+        },
+        {
+          label: 'Pending',
+          data: pending,
+          backgroundColor: '#f59e0b'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { color: '#94a3b8' },
+          grid: { color: '#334155' }
+        },
+        y: {
+          stacked: true, beginAtZero: true,
+          ticks: { color: '#94a3b8', stepSize: 1 },
+          grid: { color: '#334155' }
+        }
+      },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: '#e2e8f0', padding: 16 }
+        }
+      }
+    }
+  });
+}
+
+function renderTable(timeline) {
+  if (!timeline.length) {
+    document.getElementById('eventsTable').innerHTML =
+      '<p class="empty">No events yet. '
+      + 'Send a webhook to get started.</p>';
+    return;
+  }
+  var rows = timeline.slice().reverse().map(function(t) {
+    var st = t.completed > 0
+      ? 'exit'
+      : (t.failed > 0 ? 'error' : 'running');
+    return '<tr>'
+      + '<td>' + new Date(t.timestamp).toLocaleString() + '</td>'
+      + '<td>' + t.total + '</td>'
+      + '<td>' + statusBadge(st) + '</td>'
+      + '<td>' + t.completed + '</td>'
+      + '<td>' + t.failed + '</td>'
+      + '<td>' + t.pending + '</td>'
+      + '</tr>';
+  }).join('');
+
+  document.getElementById('eventsTable').innerHTML =
+    '<table><thead><tr>'
+    + '<th>Time</th><th>Issues</th><th>Status</th>'
+    + '<th>Done</th><th>Failed</th><th>Pending</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+async function refresh() {
+  try {
+    var resp = await fetch('/api/stats');
+    var data = await resp.json();
+    renderCards(data.overview);
+    renderStatusChart(data.status_breakdown);
+    renderThroughputChart(data.timeline);
+    renderTable(data.timeline);
+    document.getElementById('lastUpdated').textContent =
+      'Updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    console.error('Failed to refresh:', e);
+  }
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
