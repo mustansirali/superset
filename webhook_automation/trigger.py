@@ -30,6 +30,7 @@ import sys
 
 import httpx
 
+from .config import settings
 from .sample_payloads import (
     MULTI_ISSUE_PAYLOAD,
     SECURITY_ISSUE_PAYLOAD,
@@ -43,14 +44,18 @@ PAYLOADS = {
 }
 
 
+def _default_url() -> str:
+    return f"http://localhost:{settings.port}/webhook"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Send a test payload to the webhook server"
     )
     parser.add_argument(
         "--url",
-        default="http://localhost:8000/webhook",
-        help="Webhook endpoint URL (default: http://localhost:8000/webhook)",
+        default=None,
+        help=f"Webhook endpoint URL (default: http://localhost:{settings.port}/webhook)",
     )
     parser.add_argument(
         "--payload",
@@ -60,17 +65,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    url: str = args.url if args.url is not None else _default_url()
     payload = PAYLOADS[args.payload]
-    print(f"Sending '{args.payload}' payload to {args.url} ...")
+    print(f"Sending '{args.payload}' payload to {url} ...")
     print(json.dumps(payload, indent=2))
 
     try:
-        resp = httpx.post(args.url, json=payload, timeout=10)
+        resp = httpx.post(url, json=payload, timeout=10)
         print(f"\nHTTP {resp.status_code}")
         print(json.dumps(resp.json(), indent=2))
     except httpx.ConnectError:
         print(
-            f"\nERROR: Could not connect to {args.url}. Is the server running?",
+            f"\nERROR: Could not connect to {url}. Is the server running?",
             file=sys.stderr,
         )
         sys.exit(1)
