@@ -32,21 +32,56 @@ A FastAPI webhook server that receives issue payloads and automatically creates
 4. Sessions are polled asynchronously until they reach a terminal status.
 5. A remediation report is stored in memory and available via `GET /reports`.
 
-## Setup
+## Quick Start (Docker)
 
-> **Important:** All commands must be run from the **repo root** (`superset/`),
+```bash
+cd webhook_automation
+
+# 1. Create your .env file
+cp .env.example .env
+# Edit .env with your Devin API key and org ID
+
+# 2. Start the server
+docker compose up -d
+
+# 3. Fire a test payload
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"issues":[{"issue_id":"TEST-001","title":"Fix bug","description":"Fix the bug in utils.py"}]}'
+
+# 4. Check reports
+curl http://localhost:8000/reports
+
+# 5. Stop the server
+docker compose down
+```
+
+## Quick Start (Local Python)
+
+> **Important:** Run all commands from the **repo root** (`superset/`),
 > not from inside `webhook_automation/`.
 
 ```bash
-# From the repo root:
+# 1. Create and activate a virtual environment
+python3 -m venv venv
+source venv/bin/activate        # macOS / Linux
+# venv\Scripts\activate         # Windows
+
+# 2. Install dependencies
 pip install -r webhook_automation/requirements.txt
 
-# Copy .env template and fill in your API credentials:
+# 3. Create your .env file
 cp webhook_automation/.env.example webhook_automation/.env
-# Edit webhook_automation/.env with your values
+# Edit webhook_automation/.env with your Devin API key and org ID
+
+# 4. Start the server
+python -m webhook_automation
+
+# 5. In a separate terminal (with venv activated, from repo root):
+python -m webhook_automation.trigger --payload single
 ```
 
-### Environment Variables
+## Environment Variables
 
 Set these in `webhook_automation/.env` (auto-loaded) or as env vars:
 
@@ -60,57 +95,98 @@ Set these in `webhook_automation/.env` (auto-loaded) or as env vars:
 | `WEBHOOK_HOST` | No | Bind host (default: `0.0.0.0`) |
 | `WEBHOOK_PORT` | No | Bind port (default: `8000`) |
 
-## Running the Server
+> **Note:** Do not wrap values in quotes in `.env` — write
+> `WEBHOOK_DEVIN_API_KEY=cog_abc123`, not `WEBHOOK_DEVIN_API_KEY='cog_abc123'`.
+
+## API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `POST` | `/webhook` | Receive issue payloads |
+| `GET` | `/reports` | List all remediation reports |
+| `GET` | `/reports/{key}` | Get a specific report |
+
+## Sending Payloads
+
+### Built-in Sample Payloads
 
 ```bash
-# From the repo root (not from inside webhook_automation/):
-python -m webhook_automation
-
-# Or equivalently:
-uvicorn webhook_automation.server:app --port 8000
-```
-
-The server exposes:
-- `GET  /health` – Health check
-- `POST /webhook` – Receive issue payloads
-- `GET  /reports` – List all remediation reports
-- `GET  /reports/{key}` – Get a specific report
-
-## Sending Test Payloads
-
-Use the built-in trigger script (run from the **repo root**):
-
-```bash
-# Single issue
+# From repo root (local Python):
 python -m webhook_automation.trigger --payload single
-
-# Multiple issues (note: use "multi", not "multiple")
 python -m webhook_automation.trigger --payload multi
-
-# Security issue
 python -m webhook_automation.trigger --payload security
-
-# Custom server URL
-python -m webhook_automation.trigger --url https://your-server/webhook --payload single
 ```
 
-Or use `curl`:
+### Custom Payloads with curl
+
+**Single issue:**
 
 ```bash
 curl -X POST http://localhost:8000/webhook \
   -H "Content-Type: application/json" \
   -d '{
-    "event_type": "issue_remediation",
-    "repo": "mustansirali/superset",
     "issues": [{
-      "issue_id": "TEST-001",
-      "title": "Add missing type hints",
-      "description": "Add type annotations to superset/utils/date_parser.py",
+      "issue_id": "MY-001",
+      "title": "Add retry logic to API client",
+      "description": "The HTTP client in superset/utils/core.py has no retry logic. Add exponential backoff for transient failures.",
       "severity": "medium",
-      "category": "type_error",
-      "file_paths": ["superset/utils/date_parser.py"]
+      "category": "bug"
     }]
   }'
+```
+
+**Multiple issues at once:**
+
+```bash
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "issues": [
+      {
+        "issue_id": "MY-002",
+        "title": "Fix N+1 query in dashboard list",
+        "description": "The GET /api/v1/dashboard/ endpoint issues a separate query per dashboard for owners. Use a joined load instead.",
+        "severity": "high",
+        "category": "performance",
+        "file_paths": ["superset/dashboards/api.py"]
+      },
+      {
+        "issue_id": "MY-003",
+        "title": "Add unit test for date parser",
+        "description": "superset/utils/date_parser.py has no test coverage for ISO 8601 durations. Add pytest tests.",
+        "severity": "low",
+        "category": "test_failure",
+        "file_paths": ["superset/utils/date_parser.py"]
+      }
+    ]
+  }'
+```
+
+**Custom payload from a JSON file:**
+
+```bash
+# Save your payload to a file:
+cat > my_payload.json << 'EOF'
+{
+  "event_type": "security_scan",
+  "repo": "mustansirali/superset",
+  "issues": [{
+    "issue_id": "SEC-001",
+    "title": "Update vulnerable dependency",
+    "description": "cryptography<42.0.0 has a known CVE. Bump to >=42.0.0 in requirements.",
+    "severity": "critical",
+    "category": "dependency",
+    "file_paths": ["requirements/base.txt"],
+    "labels": ["security", "dependencies"]
+  }]
+}
+EOF
+
+# Send it:
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d @my_payload.json
 ```
 
 ## Webhook Payload Schema
@@ -133,6 +209,9 @@ curl -X POST http://localhost:8000/webhook \
 }
 ```
 
+Only `issue_id`, `title`, and `description` are required per issue. All other
+fields are optional and help Devin focus its remediation.
+
 ## Signature Verification
 
 If `WEBHOOK_WEBHOOK_SECRET` is set, the server requires a valid
@@ -146,13 +225,6 @@ signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdiges
 # Send as header: X-Webhook-Signature: sha256=abc123...
 ```
 
-## Running Tests
-
-```bash
-pip install pytest pytest-asyncio
-pytest webhook_automation/tests/ -v
-```
-
 ## Monitoring Remediation Progress
 
 After sending a webhook, poll the reports endpoint:
@@ -162,7 +234,42 @@ After sending a webhook, poll the reports endpoint:
 curl http://localhost:8000/reports
 
 # Get specific report (use report_key from webhook response)
-curl http://localhost:8000/reports/2025-01-15T10:30:00+00:00
+curl http://localhost:8000/reports/<report_key>
 ```
 
-Each report shows per-issue session status, Devin session URLs, and any PRs created.
+Each report shows per-issue session status, Devin session URLs, and any PRs
+created.
+
+## Running Tests
+
+```bash
+pip install pytest pytest-asyncio
+pytest webhook_automation/tests/ -v
+```
+
+## Docker Details
+
+**Build manually:**
+
+```bash
+cd webhook_automation
+docker build -t webhook-automation .
+docker run --rm -p 8000:8000 --env-file .env webhook-automation
+```
+
+**Custom port (docker compose):**
+
+Set `WEBHOOK_PORT` in `.env` to change the host-side port. The container
+always listens on 8000 internally:
+
+```bash
+# .env
+WEBHOOK_PORT=8080
+# → accessible at http://localhost:8080
+```
+
+**View logs:**
+
+```bash
+docker compose logs -f
+```

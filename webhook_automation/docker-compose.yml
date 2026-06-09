@@ -1,0 +1,13 @@
+services:
+  webhook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${WEBHOOK_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - WEBHOOK_HOST=0.0.0.0
+      - WEBHOOK_PORT=8000
+    restart: unless-stopped
