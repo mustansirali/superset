@@ -137,6 +137,41 @@ def test_get_report_not_found(test_client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+def test_dashboard_returns_html(test_client: TestClient) -> None:
+    resp = test_client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "Webhook Automation Dashboard" in resp.text
+
+
+def test_api_stats_empty(test_client: TestClient) -> None:
+    from webhook_automation.server import reports
+
+    reports.clear()
+    resp = test_client.get("/api/stats")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["overview"]["total_events"] == 0
+    assert data["overview"]["total_issues"] == 0
+    assert data["overview"]["success_rate"] == 0.0
+    assert data["timeline"] == []
+
+
+def test_api_stats_after_webhook(test_client: TestClient) -> None:
+    from webhook_automation.server import reports
+
+    reports.clear()
+    test_client.post("/webhook", json=SINGLE_ISSUE_PAYLOAD)
+
+    resp = test_client.get("/api/stats")
+    assert resp.status_code == 200
+    data = resp.json()
+    overview = data["overview"]
+    assert overview["total_events"] == 1
+    assert overview["total_issues"] == 1
+    assert len(data["timeline"]) == 1
+
+
 @pytest.mark.asyncio
 async def test_devin_client_create_session() -> None:
     """DevinAPIClient.create_session calls the correct endpoint."""

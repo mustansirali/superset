@@ -36,6 +36,7 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .config import settings
+from .dashboard import bind_reports, router as dashboard_router
 from .devin_client import DevinAPIClient
 from .models import (
     IssuePayload,
@@ -63,6 +64,10 @@ client = DevinAPIClient()
 
 # In-memory store keyed by event timestamp → report
 reports: dict[str, RemediationReport] = {}
+
+# Wire up the dashboard with access to the shared reports store.
+bind_reports(reports)
+app.include_router(dashboard_router)
 
 
 def _verify_signature(body: bytes, signature: str | None) -> None:

@@ -106,6 +106,8 @@ Set these in `webhook_automation/.env` (auto-loaded) or as env vars:
 | `POST` | `/webhook` | Receive issue payloads |
 | `GET` | `/reports` | List all remediation reports |
 | `GET` | `/reports/{key}` | Get a specific report |
+| `GET` | `/dashboard` | Analytics dashboard (HTML) |
+| `GET` | `/api/stats` | Aggregated analytics (JSON) |
 
 ## Sending Payloads
 
@@ -224,6 +226,23 @@ body = json.dumps(payload).encode()
 signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 # Send as header: X-Webhook-Signature: sha256=abc123...
 ```
+
+## Dashboard
+
+Open **<http://localhost:8000/dashboard>** in your browser to see a
+real-time analytics dashboard showing:
+
+- **Summary cards** — total events, issues, completed, failed, pending,
+  PRs created, and success rate.
+- **Task Status chart** — doughnut chart of session outcomes.
+- **Throughput Over Time** — stacked bar chart of completed/failed/pending
+  per event.
+- **Recent Events table** — reverse-chronological list with status badges.
+
+The dashboard auto-refreshes every 10 seconds. Click **Refresh** for an
+immediate update.
+
+For programmatic access, `GET /api/stats` returns the same data as JSON.
 
 ## Monitoring Remediation Progress
 
