@@ -34,12 +34,21 @@ A FastAPI webhook server that receives issue payloads and automatically creates
 
 ## Setup
 
+> **Important:** All commands must be run from the **repo root** (`superset/`),
+> not from inside `webhook_automation/`.
+
 ```bash
-cd webhook_automation
-pip install -r requirements.txt
+# From the repo root:
+pip install -r webhook_automation/requirements.txt
+
+# Copy .env template and fill in your API credentials:
+cp webhook_automation/.env.example webhook_automation/.env
+# Edit webhook_automation/.env with your values
 ```
 
 ### Environment Variables
+
+Set these in `webhook_automation/.env` (auto-loaded) or as env vars:
 
 | Variable | Required | Description |
 |---|---|---|
@@ -54,11 +63,11 @@ pip install -r requirements.txt
 ## Running the Server
 
 ```bash
-export WEBHOOK_DEVIN_API_KEY="cog_your_key_here"
-export WEBHOOK_DEVIN_ORG_ID="org-your_org_id"
+# From the repo root (not from inside webhook_automation/):
+python -m webhook_automation
 
-# From the repo root:
-uvicorn webhook_automation.server:app --host 0.0.0.0 --port 8000
+# Or equivalently:
+uvicorn webhook_automation.server:app --port 8000
 ```
 
 The server exposes:
@@ -69,13 +78,13 @@ The server exposes:
 
 ## Sending Test Payloads
 
-Use the built-in trigger script:
+Use the built-in trigger script (run from the **repo root**):
 
 ```bash
 # Single issue
 python -m webhook_automation.trigger --payload single
 
-# Multiple issues
+# Multiple issues (note: use "multi", not "multiple")
 python -m webhook_automation.trigger --payload multi
 
 # Security issue
