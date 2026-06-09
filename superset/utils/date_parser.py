@@ -693,7 +693,7 @@ class EvalDateAddFunc:  # pylint: disable=too-few-public-methods
     def eval(self) -> datetime:
         dttm_expression, delta, unit = self.value
         dttm = dttm_expression.eval()
-        delta = delta.eval() if hasattr(delta, "eval") else delta
+        delta = delta.eval() if isinstance(delta, EvalDateDiffFunc) else delta
         if unit.lower() == "quarter":
             delta = delta * 3
             unit = "month"
@@ -779,14 +779,15 @@ class EvalHolidayFunc:  # pylint: disable=too-few-public-methods
         self.value = tokens[1]
 
     def eval(self) -> datetime:
-        holiday = self.value[0].eval()
-        dttm, country = [None, None]
+        holiday: str = self.value[0].eval()
+        dttm: datetime | None = None
+        country_token: EvalText | None = None
         if len(self.value) >= 2:
             dttm = self.value[1].eval()
         if len(self.value) == 3:
-            country = self.value[2]
-        holiday_year = dttm.year if dttm else parse_human_datetime("today").year
-        country = country.eval() if country else "US"
+            country_token = self.value[2]
+        holiday_year: int = dttm.year if dttm else parse_human_datetime("today").year
+        country: str = country_token.eval() if country_token else "US"
 
         holiday_lookup = country_holidays(country, years=[holiday_year], observed=False)
         searched_result = holiday_lookup.get_named(holiday, lookup="istartswith")
@@ -798,7 +799,7 @@ class EvalHolidayFunc:  # pylint: disable=too-few-public-methods
 
 
 @lru_cache(maxsize=LRU_CACHE_MAX_SIZE)
-def datetime_parser() -> ParseResults:  # pylint: disable=too-many-locals
+def datetime_parser() -> ParserElement:  # pylint: disable=too-many-locals
     (  # pylint: disable=invalid-name
         DATETIME,  # noqa: N806
         DATEADD,  # noqa: N806
